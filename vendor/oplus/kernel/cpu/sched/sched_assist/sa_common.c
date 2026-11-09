@@ -1741,7 +1741,6 @@ void android_rvh_find_lowest_rq_handler(void *unused,
 /* register vender hook in kernel/sched/core.c */
 void android_rvh_sched_fork_handler(void *unused, struct task_struct *p)
 {
-	init_task_ux_info(p);
 }
 
 void android_rvh_after_enqueue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags)

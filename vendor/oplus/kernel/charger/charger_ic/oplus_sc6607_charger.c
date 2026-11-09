@@ -4129,12 +4129,12 @@ static int oplus_sc6607_get_charger_type(void)
 	if (!g_chip || !chg_chip || !probe_done)
 		return POWER_SUPPLY_TYPE_UNKNOWN;
 
-	if (g_chip->pd_sdp_port && chg_chip->usb_psy) {
+	if (g_chip->pd_sdp_port && chg_chip->usb_psy && g_chip->bc12_done) {
 		power_supply_changed(chg_chip->usb_psy);
 		return POWER_SUPPLY_TYPE_USB_PD_SDP;
 	}
 
-	if (oplus_check_pd_usb_type() == PORT_PD_WITH_USB)
+	if (oplus_check_pd_usb_type() == PORT_PD_WITH_USB && g_chip->bc12_done)
 		return POWER_SUPPLY_TYPE_USB_PD_SDP;
 
 	if (g_chip->oplus_chg_type != chg_chip->charger_type && chg_chip->usb_psy)

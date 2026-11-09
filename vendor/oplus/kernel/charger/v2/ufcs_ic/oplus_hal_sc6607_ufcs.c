@@ -578,6 +578,12 @@ static int sc6607_retrieve_flags(struct ufcs_dev *ufcs)
 	return rc;
 }
 
+static int sc6607_cp_reset_dpdm(struct ufcs_dev *ufcs)
+{
+	/* do nothing */
+	return 0;
+}
+
 static void sc6607_ufcs_regdump_work(struct work_struct *work)
 {
 	struct sc6607 *chip = container_of(work, struct sc6607, ufcs_regdump_work);
@@ -666,6 +672,7 @@ static struct ufcs_dev_ops ufcs_ops = {
 	.disable = sc6607_ufcs_disable,
 	.irq_event_handler = sc6607_ufcs_event_handler,
 	.retrieve_flags = sc6607_retrieve_flags,
+	.reset_dpdm = sc6607_cp_reset_dpdm,
 };
 
 static int sc6607_charger_choose(struct sc6607 *chip)

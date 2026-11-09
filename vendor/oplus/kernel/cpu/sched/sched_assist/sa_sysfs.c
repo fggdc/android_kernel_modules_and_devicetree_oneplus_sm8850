@@ -684,12 +684,6 @@ static int im_flag_set_handle(struct task_struct *task, int im_flag)
 	set_im_flag_with_bit(im_flag, task);
 #endif
 
-	if (test_bit(IM_FLAG_LAUNCHER_NON_UX_RENDER, &ots->im_flag)) {
-		int ux_state = oplus_get_static_ux_state(task);
-
-		oplus_set_ux_state_lock(task, ux_state | SA_TYPE_HEAVY, -1, true);
-	}
-
 	/* Optimization of ams/wsm lock contention */
 #ifdef CONFIG_LOCKING_PROTECT
 	LOCKING_CALL_OP(opt_ss_lock_contention, task, old_im, im_flag);

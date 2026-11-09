@@ -122,6 +122,16 @@ def define_oplus_local_modules():
     )
 
     define_oplus_ddk_module(
+        name = "oplus_bsp_file_read_record",
+        srcs = native.glob([
+            "**/*.h",
+            "file_read_record/file_read_record.c",
+        ]),
+        includes = ["."],
+        ko_deps = [":oplus_bsp_mm_osvelte"],
+    )
+
+    define_oplus_ddk_module(
         name = "oplus_bsp_zstdn",
         srcs = native.glob([
             "**/*.h",
@@ -246,6 +256,7 @@ def define_oplus_local_modules():
             "oplus_bsp_zram_opt",
             "oplus_bsp_proactive_compact",
 #            "oplus_bsp_hybridswap_zram",
+            "oplus_bsp_file_read_record",
             "oplus_bsp_uxmem_opt",
             "oplus_bsp_dynamic_readahead",
             "oplus_bsp_kswapd_opt",

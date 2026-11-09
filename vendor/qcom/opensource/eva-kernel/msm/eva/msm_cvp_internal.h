@@ -318,6 +318,8 @@ struct msm_cvp_core {
 	ktime_t last_fw_fetch_ts;
 	u32 cur_cmd_q_read_offset;
 	u32 prev_cmd_q_read_offset;
+
+	bool pm_resume;
 };
 
 struct msm_cvp_inst {

@@ -84,6 +84,7 @@ def define_oplus_ddk_modules(target, msm_target, variant):
         "//vendor/oplus/kernel/mm:oplus_bsp_sigkill_diagnosis",
         "//vendor/oplus/kernel/mm:oplus_bsp_uxmem_opt",
         "//vendor/oplus/kernel/mm:oplus_bsp_zram_opt",
+        "//vendor/oplus/kernel/mm:oplus_bsp_file_read_record",
         "//vendor/oplus/kernel/multimedia/feedback/bazel:oplus_mm_kevent",
         "//vendor/oplus/kernel/multimedia/feedback/bazel:oplus_mm_kevent_fb",
         "//vendor/oplus/kernel/network:oplus_network_app_monitor",

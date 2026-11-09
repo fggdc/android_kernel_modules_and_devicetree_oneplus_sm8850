@@ -37,6 +37,7 @@ static bool cam_scene;
 static unsigned long cam_scene_timeout;
 static struct task_struct *cached_prefill_task;
 static struct boost_pool *cached_boostpool;
+static bool boost_pool_test;
 
 static bool ezr_enabled_and_cached(struct boost_pool *boost_pool)
 {
@@ -363,8 +364,13 @@ static int all_pool_nr_pages(struct boost_pool *pool, bool dump)
 	nr_boost_pool = boost_pool_nr_pages(pool);
 
 	if (dump) {
-		pr_info("dmabuf_pool: %dMib erm_lru: %dMib erm_free: %dMib boost_pool: %dMib\n",
-			P2M(nr_dmabuf_pool), P2M(nr_erm_lru), P2M(nr_erm_free), P2M(nr_boost_pool));
+		pr_info("test:%d dmabuf_pool: %dMib erm_lru: %dMib erm_free: %dMib boost_pool: %dMib\n",
+			boost_pool_test, P2M(nr_dmabuf_pool), P2M(nr_erm_lru), P2M(nr_erm_free), P2M(nr_boost_pool));
+	}
+	if (boost_pool_test) {
+		nr_erm_lru = 0;
+		nr_erm_free = 0;
+		nr_dmabuf_pool = 0;
 	}
 	return nr_dmabuf_pool + nr_erm_lru + nr_erm_free + nr_boost_pool;
 }
@@ -413,6 +419,10 @@ static int boost_pool_prefill_kthread(void *p)
 			P2M(boost_pool->alloc));
 		all_pool_nr_pages(boost_pool, true);
 
+		if (boost_pool_test) {
+			pr_info("reset boost_pool_test\n");
+			boost_pool_test = false;
+		}
 		boost_pool->prefill = false;
 		boost_pool->stop = true;
 		boost_pool->alloc = max(boost_pool_nr_pages(boost_pool),
@@ -600,6 +610,11 @@ static ssize_t custom_pid_write(struct file *file, const char __user *buf,
 			current->comm, current->tgid,
 			task->comm, task->tgid);
 		boost_pool->custom_pid = task->tgid;
+
+		if (strncmp(task->comm, "lmkd", 4) == 0) {
+			boost_pool_test = true;
+			pr_info("set boost_pool_test\n");
+		}
 	}
 	rcu_read_unlock();
 

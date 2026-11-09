@@ -22,17 +22,24 @@
 #include "sa_balance.h"
 #endif
 
-struct kmem_cache *oplus_task_struct_cachep;
-EXPORT_SYMBOL(oplus_task_struct_cachep);
+static struct kmem_cache *oplus_task_struct_cachep;
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_POWERMODEL)
 void (*ots_free_powermodel_task_state)(struct oplus_task_struct *ots) = NULL;
 EXPORT_SYMBOL(ots_free_powermodel_task_state);
 #endif
 
-static inline struct oplus_task_struct *alloc_oplus_task_struct_node(int node)
+static inline void init_oplus_task_struct(struct oplus_task_struct *ots);
+
+static inline struct oplus_task_struct *alloc_oplus_task_struct(struct task_struct *task)
 {
-	return kmem_cache_alloc(oplus_task_struct_cachep, GFP_ATOMIC);
+	struct oplus_task_struct *ots = kmem_cache_alloc(oplus_task_struct_cachep, GFP_ATOMIC);
+	if (IS_ERR_OR_NULL(ots))
+		return NULL;
+
+	init_oplus_task_struct(ots);
+	ots->task = task;
+	return ots;
 }
 
 static inline void free_oplus_task_struct(struct oplus_task_struct *ots)
@@ -43,16 +50,9 @@ static inline void free_oplus_task_struct(struct oplus_task_struct *ots)
 	kmem_cache_free(oplus_task_struct_cachep, ots);
 }
 
-/* called from kernel_clone() to get node information for about to be created task */
-static int oplus_tsk_fork_get_node(struct task_struct *tsk)
-{
-	return NUMA_NO_NODE;
-}
-
 void android_vh_dup_task_struct_handler(void *unused,
 		struct task_struct *tsk, struct task_struct *orig)
 {
-	int node;
 	struct oplus_task_struct *ots;
 	struct oplus_task_struct *orig_ots;
 
@@ -62,15 +62,10 @@ void android_vh_dup_task_struct_handler(void *unused,
 	if (!IS_ERR_OR_NULL((void *)get_oplus_task_struct(tsk)))
 		return;
 
-	node = oplus_tsk_fork_get_node(orig);
-	ots = alloc_oplus_task_struct_node(node);
+	ots = alloc_oplus_task_struct(tsk);
 	if (IS_ERR_OR_NULL(ots))
 		return;
-	atomic_set(&ots->is_vip_mvp, 0);
-	ots->task = tsk;
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-	ots->uid_struct = NULL;
-#endif
+
 	/* if thread fork from RenderThread, inherit its IM_FLAG_RENDER_THREAD */
 	orig_ots = get_oplus_task_struct(orig);
 	if (!IS_ERR_OR_NULL(orig_ots)) {
@@ -108,26 +103,6 @@ void android_vh_free_task_handler(void *unused, struct task_struct *tsk)
 #endif
 
 	set_oplus_task_struct(tsk, 0);
-	barrier();
-
-#ifdef CONFIG_LOCKING_PROTECT
-	list_del_init(&ots->locking_entry);
-#endif
-	RB_CLEAR_NODE(&ots->ux_entry);
-	RB_CLEAR_NODE(&ots->exec_time_node);
-	list_del_init(&ots->fbg_list);
-	atomic_set(&ots->is_vip_mvp, 0);
-	ots->task = NULL;
-
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
-	RB_CLEAR_NODE(&ots->ddl_node);
-	ots->ddl = ots->ddl_active_ts = 0;
-	memset(&ots->state, 0, sizeof(unsigned long));
-#endif
-
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-	ots->uid_struct = NULL;
-#endif
 	smp_mb();
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_POWERMODEL)
@@ -159,9 +134,8 @@ static void unregister_oemdata_hooks(void)
  * NOTE:
  * Initialize the oplus_task_struct here.
  */
-static void init_oplus_task_struct(void *ptr)
+static void init_oplus_task_struct(struct oplus_task_struct *ots)
 {
-	struct oplus_task_struct *ots = ptr;
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_POWERMODEL)
 	int cpu;
 #endif
@@ -235,15 +209,9 @@ static void alloc_ots_mem_for_all_threads(void)
 
 		ots = get_oplus_task_struct(p);
 		if (IS_ERR_OR_NULL(ots)) {
-			ots = kmem_cache_alloc(oplus_task_struct_cachep, GFP_ATOMIC);
-
+			ots = alloc_oplus_task_struct(p);
 			if (!IS_ERR_OR_NULL(ots)) {
-				ots->task = p;
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-				ots->uid_struct = NULL;
-#endif
 				smp_mb();
-
 				set_oplus_task_struct(p, ots);
 			}
 		}
@@ -254,14 +222,9 @@ static void alloc_ots_mem_for_all_threads(void)
 		p = cpu_rq(iter_cpu)->idle;
 		ots = get_oplus_task_struct(p);
 		if (IS_ERR_OR_NULL(ots)) {
-			ots = kmem_cache_alloc(oplus_task_struct_cachep, GFP_ATOMIC);
+			ots = alloc_oplus_task_struct(p);
 			if (!IS_ERR_OR_NULL(ots)) {
-				ots->task = p;
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-				ots->uid_struct = NULL;
-#endif
 				smp_mb();
-
 				set_oplus_task_struct(p, ots);
 			}
 		}
@@ -273,7 +236,7 @@ int sa_oemdata_init(void)
 {
 	oplus_task_struct_cachep = kmem_cache_create("oplus_task_struct",
 			sizeof(struct oplus_task_struct), 0,
-			SLAB_PANIC|SLAB_ACCOUNT, init_oplus_task_struct);
+			SLAB_PANIC | SLAB_ACCOUNT, NULL);
 
 	if (!oplus_task_struct_cachep)
 		return -ENOMEM;

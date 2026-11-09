@@ -41,6 +41,7 @@ static bool ezr_enabled;
 static bool cam_scene;
 static unsigned long cam_scene_timeout;
 static struct dynamic_boost_pool *cached_boostpool;
+static bool boost_pool_test;
 
 #define MAX_BOOST_POOL_HIGH (1024 * 256)
 
@@ -254,10 +255,15 @@ static int all_pool_nr_pages(struct dynamic_boost_pool *pool, bool dump)
 	int nr_boost_pool = dynamic_boost_pool_nr_pages(pool);
 
 	if (dump) {
-		pr_info("all_pool_nr_pages: dmabuf_pool: %dMib erm_lru: %dMib erm_free: %dMib boost_pool: %dMib\n",
-			M(nr_dmabuf_pool), M(nr_erm_lru), M(nr_erm_free), M(nr_boost_pool));
+		pr_info("test:%d dmabuf_pool:%dMib erm_lru:%dMib erm_free:%dMib boost_pool:%dMib\n",
+			boost_pool_test, M(nr_dmabuf_pool), M(nr_erm_lru), M(nr_erm_free), M(nr_boost_pool));
 	}
 
+	if (boost_pool_test) {
+		nr_erm_lru = 0;
+		nr_erm_free = 0;
+		nr_dmabuf_pool = 0;
+	}
 	return nr_dmabuf_pool + nr_erm_lru + nr_erm_free + nr_boost_pool;
 }
 
@@ -361,6 +367,10 @@ static int dynamic_boost_pool_prefill_kworkthread(void *p)
 			jiffies_to_msecs(jiffies - begin));
 		all_pool_nr_pages(pool, true);
 
+		if (boost_pool_test) {
+			pr_info("reset boost_pool_test\n");
+			boost_pool_test = false;
+		}
 		pool->high = max(dynamic_boost_pool_nr_pages(pool), pool->low);
 		pool->prefill = false;
 		/* direct_vm_swappiness = 60; */
@@ -1073,6 +1083,11 @@ static ssize_t camera_pid_write(struct file *file, const char __user *buf,
 			current->comm, current->tgid,
 			task->comm, task->tgid);
 		boost_pool->camera_pid = task->tgid;
+
+		if (strncmp(task->comm, "lmkd", 4) == 0) {
+			boost_pool_test = true;
+			pr_info("set boost_pool_test\n");
+		}
 	}
 	rcu_read_unlock();
 

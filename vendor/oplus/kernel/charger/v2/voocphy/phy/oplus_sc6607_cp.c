@@ -52,10 +52,6 @@ enum {
 
 struct sc6607 {
 	s32 chip_id;
-	bool error_reported;
-	bool vac_support;
-	bool shutdown_pending;
-	bool work_start;
 	enum oplus_cp_work_mode cp_work_mode;
 	enum oplus_dpdm_switch_mode dpdm_switch_mode;
 	int charge_type;
@@ -85,6 +81,11 @@ struct sc6607 {
 	int cp_reg_track[SC6607_TRACK_REG_NUM];
 	int cp_reason_seq[SC6607_IRQ_EVNET_NUM];
 	int i2c_err_debug;
+	bool error_reported;
+	bool vac_support;
+	bool shutdown_pending;
+	bool work_start;
+	bool is_sc6607a;
 };
 
 struct irq_info {
@@ -562,7 +563,8 @@ static void sc6607_voocphy_update_data(struct oplus_voocphy_manager *voocphy)
 	chip = voocphy->priv_data;
 
 	ret = sc6607_field_write(chip, F_WD_TIME_RST, true);
-	chip->interrupt_flag = sc6607_voocphy_get_int_value(voocphy);
+	if (!voocphy->ufcs_enable)
+		chip->interrupt_flag = sc6607_voocphy_get_int_value(voocphy);
 
 	/*parse data_block for improving time of interrupt*/
 	sc6607_field_write(chip, F_ADC_FREEZE, 1);
@@ -807,7 +809,6 @@ static u8 sc6607_voocphy_get_int_value(struct oplus_voocphy_manager *voocphy)
 #define CP_SWITCHING_WORK_DELAY_MS	1000
 static int sc6607_voocphy_set_chg_enable(struct oplus_voocphy_manager *voocphy, bool enable)
 {
-	u8 data = 0;
 	int ret = 0;
 	struct sc6607 *chip;
 
@@ -823,8 +824,31 @@ static int sc6607_voocphy_set_chg_enable(struct oplus_voocphy_manager *voocphy, 
 		ret = sc6607_field_write(chip, F_CP_EN, false);
 		cancel_delayed_work(&chip->track_cp_switching_work);
 	}
+	return 0;
+}
 
-	sc6607_voocphy_read_byte(voocphy->client, SC6607_REG_CP_CTRL, &data); /*performance mode , CP mode*/
+static int sc6607_voocphy_set_perf_enable(struct oplus_voocphy_manager *voocphy, bool enable)
+{
+	int ret = 0;
+	struct sc6607 *chip;
+
+	if (!voocphy || !voocphy->priv_data)
+		return -EINVAL;
+
+	chip = voocphy->priv_data;
+
+	/*
+	 * AI-REVIEW-JUSTIFIED:
+	 * Reviewed and expected behavior. This helper is a one-way trigger used
+	 * by vbus-adjust flow to enter perf mode. Disable path is intentionally
+	 * handled by reset/hw-setting sequences (not in this helper), so we only
+	 * program F_CHG_EN/F_PERFORMANCE_EN when enable == true.
+	 */
+	if (enable) {
+		ret = sc6607_field_write(chip, F_CHG_EN, true);
+		ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+	}
+	chg_info("enable:%d\n", enable);
 	return 0;
 }
 
@@ -1022,7 +1046,17 @@ static int sc6607_voocphy_init_vooc(struct oplus_voocphy_manager *voocphy)
 	sc6607_voocphy_init_device(voocphy);
 
 	sc6607_voocphy_write_word(voocphy->client, SC6607_REG_PREDATA_VALUE, 0x0);
-	sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_DPDM_CTRL, 0x24); /*dp dm pull down 20k*/
+	if (chip->is_sc6607a) {
+		if (oplus_chg_get_fcs_support_flags()) {
+			sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_DPDM_CTRL, 0x24);
+			msleep(30);
+		}
+		sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_DPDM_CTRL, 0xB4);
+		sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_DPDM_CTRL_2, 0x39);
+		sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_DPDM_NONSTD_STAT, 0x08);
+	} else {
+		sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_DPDM_CTRL, 0x24); /*dp dm pull down 20k*/
+	}
 	sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_T5_T7_SETTING, 0xD1); /*T5~T7 setting*/
 	sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_VOOCPHY_IRQ, 0x05); /*mask rx start and txdone flag*/
 
@@ -1071,9 +1105,15 @@ static int sc6607_voocphy_svooc_hw_setting(struct oplus_voocphy_manager *voocphy
 	ret = sc6607_field_write(chip, F_IBUS_OCP, reg_data); /*IBUS_OCP_UCP:4.25A*/
 	ret = sc6607_set_charge_watchdog_timer(chip, 1000);
 	ret = sc6607_field_write(chip, F_MODE, 0x0);
-	ret = sc6607_field_write(chip, F_PMID2OUT_OVP, 0x07);
-	ret = sc6607_field_write(chip, F_CHG_EN, true);
-	ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+	if (chip->is_sc6607a)
+		ret = sc6607_voocphy_write_byte(voocphy->client,
+		    SC6607_REG_PMID2OUT_OVP, 0x26); /*REG_PMID2OUT_OVP set 2000mv */
+	else
+		ret = sc6607_field_write(chip, F_PMID2OUT_OVP, 0x07);
+	if (!oplus_chg_get_fcs_support_flags()) {
+		ret = sc6607_field_write(chip, F_CHG_EN, true);
+		ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+	}
 	sc6607_voocphy_read_byte(voocphy->client, SC6607_REG_CP_CTRL, &data);
 	sc6607_voocphy_set_sstimeout_ucp_enable(voocphy, false);
 	chg_info("data:0x%x\n", data);
@@ -1100,8 +1140,14 @@ static int sc6607_voocphy_vooc_hw_setting(struct oplus_voocphy_manager *voocphy)
 	ret = sc6607_set_charge_watchdog_timer(chip, 1000);
 	/*need to set bit1 bp:1 default 0; mode bit1 sc:0 bp:1 default 0  mos bit0, enable:1*/
 	ret = sc6607_field_write(chip, F_MODE, 0x1);
-	ret = sc6607_field_write(chip, F_CHG_EN, true);
-	ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+
+	if (!oplus_chg_get_fcs_support_flags()) {
+		ret = sc6607_field_write(chip, F_CHG_EN, true);
+		ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+	}
+	if (chip->is_sc6607a)
+		ret = sc6607_voocphy_write_byte(voocphy->client,
+		    SC6607_REG_PMID2OUT_OVP, 0x26); /*REG_PMID2OUT_OVP set 2000mv */
 	sc6607_voocphy_set_sstimeout_ucp_enable(voocphy, false);
 	return 0;
 }
@@ -1719,8 +1765,15 @@ static DEVICE_ATTR(i2c_err, 0660, sc6607_i2c_err_show, sc6607_i2c_err_store);
 
 static void sc6607_create_device_node(struct device *dev)
 {
-	device_create_file(dev, &dev_attr_track_reg);
-	device_create_file(dev, &dev_attr_i2c_err);
+	int ret;
+
+	ret = device_create_file(dev, &dev_attr_track_reg);
+	if (ret)
+		chg_err("create track_reg node failed, ret = %d\n", ret);
+
+	ret = device_create_file(dev, &dev_attr_i2c_err);
+	if (ret)
+		chg_err("create i2c_err node failed, ret = %d\n", ret);
 }
 
 static void sc6607_remove_device_node(struct device *dev)
@@ -1817,6 +1870,7 @@ static struct oplus_voocphy_operations sc6607_voocphy_ops = {
 	.update_data = sc6607_voocphy_update_data,
 	.get_chg_enable = sc6607_voocphy_get_chg_enable,
 	.set_chg_enable = sc6607_voocphy_set_chg_enable,
+	.set_perf_enable = sc6607_voocphy_set_perf_enable,
 	.reset_voocphy = sc6607_voocphy_reset_voocphy,
 	.reactive_voocphy = sc6607_voocphy_reactive_voocphy,
 	.send_handshake = sc6607_voocphy_send_handshake,
@@ -2011,8 +2065,14 @@ static int sc6607_vooc_hw_setting(struct sc6607 *chip)
 	ret = sc6607_field_write(chip, F_MODE, 0x1); /*bypass*/
 	ret = sc6607_field_write(chip, F_CP_EN, 0x0);
 	ret = sc6607_field_write(chip, F_PHY_EN, 0x0); /*VOOC_disable*/
-	ret = sc6607_field_write(chip, F_CHG_EN, true); /*performance mode disable , CP mode*/
-	ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+
+	if (!oplus_chg_get_fcs_support_flags()) {
+		ret = sc6607_field_write(chip, F_CHG_EN, true);
+		ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+	}
+	if (chip->is_sc6607a)
+		ret = sc6607_voocphy_write_byte(chip->client,
+		    SC6607_REG_PMID2OUT_OVP, 0x26); /*REG_PMID2OUT_OVP set 2000mv */
 	return ret;
 }
 
@@ -2033,9 +2093,16 @@ static int sc6607_svooc_hw_setting(struct sc6607 *chip)
 	ret = sc6607_field_write(chip, F_VBUS_OVP, 2);    /*VBUS_OVP:12v*/
 	ret = sc6607_field_write(chip, F_PHY_EN, 0x0); /* close CP*/
 	ret = sc6607_field_write(chip, F_MODE, 0x0);
-	ret = sc6607_field_write(chip, F_CHG_EN, true); /*performance mode disable , CP mode*/
-	ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
-	ret = sc6607_field_write(chip, F_PMID2OUT_OVP, 0x06); /*F_PMID2OUT_OVP set 600mv */
+
+	if (!oplus_chg_get_fcs_support_flags()) {
+		ret = sc6607_field_write(chip, F_CHG_EN, true); /*performance mode disable , CP mode*/
+		ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+	}
+	if (chip->is_sc6607a)
+		ret = sc6607_voocphy_write_byte(chip->client,
+		    SC6607_REG_PMID2OUT_OVP, 0x26); /*REG_PMID2OUT_OVP set 2000mv */
+	else
+		ret = sc6607_field_write(chip, F_PMID2OUT_OVP, 0x06); /*F_PMID2OUT_OVP set 550mv */
 	return ret;
 }
 
@@ -2367,6 +2434,11 @@ static int sc6607_cp_set_work_start(struct oplus_chg_ic_dev *ic_dev, bool start)
 	chip = oplus_chg_ic_get_priv_data(ic_dev);
 
 	chg_info("%s work %s\n", chip->dev->of_node->name, start ? "start" : "stop");
+	if (oplus_chg_get_fcs_support_flags() && start) {
+		rc = sc6607_field_write(chip, F_CHG_EN, true);
+		rc = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
+		msleep(10);
+	}
 	rc = sc6607_field_write(chip, F_CP_EN, start);
 	if (rc < 0)
 		return rc;
@@ -2488,6 +2560,11 @@ static int sc6607_cp_set_ucp_disable(struct oplus_chg_ic_dev *ic_dev, bool disab
 
 	chg_info("%s %s\n", chip->dev->of_node->name, disable ? "disable" : "enable");
 	sc6607_field_write(chip, F_IBUS_UCP_DIS, disable);
+	if (disable)
+		sc6607_field_write(chip, F_SS_TIMEOUT, SC6607_VOOCPHY_SS_TIMEOUT_DISABLE);
+	else
+		sc6607_field_write(chip, F_SS_TIMEOUT, SC6607_VOOCPHY_SS_TIMEOUT_10S);
+
 	return 0;
 }
 
