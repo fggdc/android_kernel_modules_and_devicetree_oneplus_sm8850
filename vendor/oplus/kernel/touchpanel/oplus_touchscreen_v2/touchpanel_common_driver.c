@@ -308,6 +308,7 @@ void operate_mode_switch(struct touchpanel_data *ts)
 					ts->is_suspended = 1;
 				} else {
 					TP_INFO(ts->tp_index, "TP out mode aod start\n");
+					ts->gesture_button_on = false;
 					mode_switch_health(ts,  MODE_INCELL_AOD, false);
 				}
 			} else {
@@ -4474,6 +4475,7 @@ int register_common_touch_device(struct touchpanel_data *pdata)
 	ts->fd_enable = 0;
 	ts->fp_enable = 0;
 	ts->aiunit_game_enable = 0;
+	ts->gesture_button_on = false;
 	ts->fp_info.touch_state = 0;
 	ts->palm_enable = 1;
 	ts->touch_count = 0;
@@ -5892,6 +5894,12 @@ static int tp_gesture_enable_flag(unsigned int tp_index)
 
 	if (!ts || !ts->is_incell_panel) {
 		return LCD_POWER_OFF;
+	}
+
+	if (ts->gesture_button_on) {
+		ts->gesture_button_on = false;
+		TP_INFO(ts->tp_index, "gesture_button_on ==> POWER_ON\n");
+		return LCD_POWER_ON;
 	}
 
 	TP_INFO(ts->tp_index, "gesture_enable is %d\n", ts->gesture_enable);

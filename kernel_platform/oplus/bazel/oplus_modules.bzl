@@ -42,7 +42,6 @@ def define_oplus_ddk_modules(target, msm_target, variant):
         "//vendor/oplus/kernel/cpu:oplus_bsp_task_sched",
         "//vendor/oplus/kernel/cpu:oplus_bsp_waker_identify",
         "//vendor/oplus/kernel/cpu:oplus_freqqos_monitor",
-        "//vendor/oplus/kernel/cpu:osml_monitor",
         "//vendor/oplus/kernel/cpu:ua_cpu_ioctl",
         "//vendor/oplus/kernel/device_info/device_info/bazel:device_info",
         "//vendor/oplus/kernel/device_info/magnetic_cover:oplus_magcvr_ak09973",

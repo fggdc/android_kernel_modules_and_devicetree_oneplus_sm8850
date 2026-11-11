@@ -626,24 +626,13 @@ static int sc6607_voocphy_get_cp_ichg(struct oplus_voocphy_manager *voocphy)
 	int cp_ichg = 0;
 	u8 cp_enable = 0;
 	struct sc6607 *chip;
-	bool reset_read_ibus = false;
-	int ibus_devation = 0;
-	int slave_ibus = 0;
 
 	if (!voocphy || !voocphy->priv_data)
 		return 0;
 
 	chip = voocphy->priv_data;
 
-	if (voocphy->voocphy_dual_cp_support) {
-		slave_ibus = voocphy->slave_cp_ichg;
-		ibus_devation = abs(voocphy->cp_ichg - slave_ibus);
-		if (ibus_devation > voocphy->cp_ibus_devation) {
-			chg_info("ibus_devation is %d\n" , ibus_devation);
-			reset_read_ibus = true;
-		}
-	}
-	if (oplus_voocphy_get_fastchg_commu_ing() && !reset_read_ibus) {
+	if (oplus_voocphy_get_fastchg_commu_ing()) {
 		chg_info("svooc in communication\n");
 		return voocphy->cp_ichg;
 	}
@@ -725,19 +714,23 @@ static int sc6607_voopchy_get_adc_enable(struct oplus_voocphy_manager *voocphy, 
 	int ret = 0;
 	struct sc6607 *chip;
 
-	if (!voocphy || !voocphy->priv_data)
+	if (!voocphy || !voocphy->priv_data || !data)
 		return -EINVAL;
 
 	chip = voocphy->priv_data;
 
-	ret = sc6607_field_read(chip, F_ADC_EN, data);
+	if (oplus_voocphy_get_fastchg_commu_ing()) {
+		*data = 1;
+		return 0;
+	}
 
+	ret = sc6607_field_read(chip, F_ADC_EN, data);
 	if (ret < 0) {
 		chg_err("F_ADC_EN\n");
 		return -EIO;
 	}
 
-	return ret;
+	return 0;
 }
 
 static int sc6607_adc_read_vbat(struct sc6607 *chip)
@@ -931,6 +924,8 @@ static int sc6607_set_charge_watchdog_timer(struct sc6607 *voocphy, u32 timeout)
 static void sc6607_voocphy_send_handshake(struct oplus_voocphy_manager *voocphy)
 {
 	struct sc6607 *chip;
+	int ibus = 0;
+	int i;
 
 	if (!voocphy || !voocphy->priv_data)
 		return;
@@ -941,7 +936,14 @@ static void sc6607_voocphy_send_handshake(struct oplus_voocphy_manager *voocphy)
 		return;
 	}
 
-	chg_info("\n");
+	for (i = 0; i < SC6607_VOOCPHY_HANDSHAKE_IBUS_RETRY_MAX_COUNT; i++) {
+		ibus = sc6607_adc_read_ibus(chip);
+		chg_info("ibus=%d mA, retry=%d\n", ibus, i);
+		if (ibus > SC6607_VOOCPHY_HANDSHAKE_IBUS_THRESHOLD_MA)
+			break;
+		msleep(SC6607_VOOCPHY_HANDSHAKE_IBUS_RETRY_DELAY_MS);
+	}
+
 	sc6607_voocphy_write_byte(voocphy->client, SC6607_REG_PHY_CTRL, 0x81);
 }
 
@@ -2065,11 +2067,10 @@ static int sc6607_vooc_hw_setting(struct sc6607 *chip)
 	ret = sc6607_field_write(chip, F_MODE, 0x1); /*bypass*/
 	ret = sc6607_field_write(chip, F_CP_EN, 0x0);
 	ret = sc6607_field_write(chip, F_PHY_EN, 0x0); /*VOOC_disable*/
+	ret |= sc6607_field_write(chip, F_CHG_EN, true);
 
-	if (!oplus_chg_get_fcs_support_flags()) {
-		ret = sc6607_field_write(chip, F_CHG_EN, true);
-		ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
-	}
+	if (!oplus_chg_get_fcs_support_flags())
+		ret |= sc6607_field_write(chip, F_PERFORMANCE_EN, true);
 	if (chip->is_sc6607a)
 		ret = sc6607_voocphy_write_byte(chip->client,
 		    SC6607_REG_PMID2OUT_OVP, 0x26); /*REG_PMID2OUT_OVP set 2000mv */
@@ -2093,11 +2094,11 @@ static int sc6607_svooc_hw_setting(struct sc6607 *chip)
 	ret = sc6607_field_write(chip, F_VBUS_OVP, 2);    /*VBUS_OVP:12v*/
 	ret = sc6607_field_write(chip, F_PHY_EN, 0x0); /* close CP*/
 	ret = sc6607_field_write(chip, F_MODE, 0x0);
+	ret = sc6607_field_write(chip, F_CHG_EN, true); /*performance mode disable , CP mode*/
 
-	if (!oplus_chg_get_fcs_support_flags()) {
-		ret = sc6607_field_write(chip, F_CHG_EN, true); /*performance mode disable , CP mode*/
+	if (!oplus_chg_get_fcs_support_flags())
 		ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
-	}
+
 	if (chip->is_sc6607a)
 		ret = sc6607_voocphy_write_byte(chip->client,
 		    SC6607_REG_PMID2OUT_OVP, 0x26); /*REG_PMID2OUT_OVP set 2000mv */
@@ -2435,7 +2436,6 @@ static int sc6607_cp_set_work_start(struct oplus_chg_ic_dev *ic_dev, bool start)
 
 	chg_info("%s work %s\n", chip->dev->of_node->name, start ? "start" : "stop");
 	if (oplus_chg_get_fcs_support_flags() && start) {
-		rc = sc6607_field_write(chip, F_CHG_EN, true);
 		rc = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
 		msleep(10);
 	}

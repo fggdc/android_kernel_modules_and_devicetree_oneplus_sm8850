@@ -154,6 +154,7 @@
 
 #define FLASH_MODE_DELAY		400
 #define FLASH_MODE_CHECKOUT_DELAY	2000
+#define FLASH_MODE_CHK_POLL_DELAY	500
 
 #define DECL_ALERT_HANDLER(xbit, xhandler) { \
 	.bit_mask = (1 << xbit), \

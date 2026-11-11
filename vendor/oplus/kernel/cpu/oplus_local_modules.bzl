@@ -176,7 +176,6 @@ def define_oplus_local_modules():
                 "oplus_bsp_task_overload",
                 "oplus_bsp_sched_ext",
                 "oplus_bsp_task_sched",
-                "osml_monitor",
             ],
         )
     elif (bazel_support_platform == "mtk") and (target == "k6993v1_64") :

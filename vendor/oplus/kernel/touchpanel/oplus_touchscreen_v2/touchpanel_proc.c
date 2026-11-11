@@ -854,6 +854,13 @@ static ssize_t proc_gesture_control_write(struct file *file,
 	case 3:
 		if (ts->gesture_enable != value) {
 			ts->gesture_enable = value;
+
+			if (value == 0 && ts->is_suspended) {
+				ts->gesture_button_on = true;
+			} else {
+				ts->gesture_button_on = false;
+			}
+
 			TP_INFO(ts->tp_index, "%s: gesture_enable = %d, is_suspended = %d\n", __func__,
 				ts->gesture_enable, ts->is_suspended);
 

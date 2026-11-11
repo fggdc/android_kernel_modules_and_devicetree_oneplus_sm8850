@@ -420,14 +420,14 @@ static struct ctl_table hmbird_Camera_table[] = {
 		.procname	= "boost_threshold",
 		.data		= &boost_threshold,
 		.maxlen		= sizeof(unsigned int),
-		.mode		= 0666,
+		.mode		= 0644,
 		.proc_handler	= cfg_boost_threshold_handler,
 	},
 	{
 		.procname	= "boost_enable",
 		.data		= &boost_enable,
 		.maxlen		= sizeof(int),
-		.mode		= 0666,
+		.mode		= 0644,
 		.proc_handler	= cfg_boost_enable_handler,
 	},
 };
